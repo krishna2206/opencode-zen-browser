@@ -1,0 +1,46 @@
+{
+  "name": "opencode-zen-browser",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenCode 2 plugin and Zen Browser companion extension for human-paced web exploration.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "host",
+    "extension"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test tests",
+    "install-host": "bun host/install.mjs"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.5",
+    "@types/node": "^24.0.0",
+    "@types/turndown": "^5.0.5",
+    "effect": "4.0.6",
+    "typescript": "7.0.2"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.2.0",
+    "effect": "^4.0.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "OpenCode Zen Browser",
+  "version": "0.1.0",
+  "description": "Connect selected Zen Browser tabs to OpenCode AI agents.",
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "opencode-zen-browser@krishna.dev",
+      "strict_min_version": "128.0"
+    }
+  },
+  "permissions": [
+    "tabs",
+    "cookies",
+    "scripting",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_title": "OpenCode Zen Browser",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon.svg",
+      "96": "icons/icon.svg"
+    }
+  }
+}

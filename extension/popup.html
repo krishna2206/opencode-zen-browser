@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenCode Zen Browser</title>
+  <link rel="stylesheet" href="popup.css" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 320px;
+      background: var(--bg-base);
+    }
+  </style>
+</head>
+<body>
+  <div class="popup-root" id="popupRoot">
+    <header class="popup-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+            <rect x="2" y="2" width="12" height="12" rx="3" stroke="currentColor" stroke-width="1.4"/>
+            <circle cx="8" cy="8" r="2.1" fill="currentColor"/>
+          </svg>
+        </span>
+        <span>OpenCode Zen Browser</span>
+      </div>
+      <span class="bridge-status" id="bridgePill">
+        <span class="status-dot"></span>
+        <span id="bridgeLabel">Connexion...</span>
+      </span>
+    </header>
+
+    <div class="alert-offline" id="offlineAlert" hidden>
+      Pont local hors ligne. Vérifie que le manifeste Native Messaging est installé puis recharge l'extension.
+    </div>
+
+    <section class="active-section" aria-label="Onglet actif">
+      <div class="eyebrow">
+        <span>Onglet actif</span>
+        <span class="active-state-label" id="currentStateLabel" hidden></span>
+      </div>
+
+      <div class="active-tab-row">
+        <span class="active-tab-favicon" id="currentFavicon" aria-hidden="true"></span>
+        <div class="active-tab-meta">
+          <div class="tab-title-main" id="currentTitle">Chargement...</div>
+          <div class="tab-url-sub" id="currentUrl"></div>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="toggleTabBtn" type="button">
+          Attacher cet onglet
+        </button>
+        <button class="btn btn-secondary" id="toggleWindowBtn" type="button">
+          Toute la fenêtre
+        </button>
+      </div>
+    </section>
+
+    <div class="toggle-wrap">
+      <label class="toggle-row" for="readOnlyCheck">
+        <span class="toggle-text">
+          <span class="toggle-label">Lecture seule</span>
+          <span class="toggle-hint">Bloque les clics et la saisie</span>
+        </span>
+        <span class="switch">
+          <input type="checkbox" id="readOnlyCheck" />
+          <span class="switch-track"></span>
+          <span class="switch-thumb"></span>
+        </span>
+      </label>
+    </div>
+
+    <section class="tabs-section" aria-label="Onglets ouverts">
+      <div class="section-head">
+        <span class="section-title" id="listTitle">Onglets ouverts · 0</span>
+        <button class="link-btn" id="detachAllBtn" type="button" hidden>Tout détacher</button>
+      </div>
+      <div class="tab-list" id="tabList"></div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
