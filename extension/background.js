@@ -8,6 +8,55 @@ const attachedTabs = new Set();
 const agentOpenedTabs = new Set();
 const attachedWindows = new Set();
 
+const MAX_NETWORK_ENTRIES_PER_TAB = 80;
+const networkLogs = new Map();
+const pendingRequests = new Map();
+const STRIPPED_HEADERS = new Set([
+  "cookie",
+  "cookie2",
+  "set-cookie",
+  "user-agent",
+  "accept-encoding",
+  "accept-language",
+  "connection",
+  "host",
+]);
+const textDecoder = new TextDecoder();
+
+function decodeRequestBody(requestBody) {
+  if (!requestBody) return undefined;
+  if (Array.isArray(requestBody.raw) && requestBody.raw.length > 0) {
+    try {
+      const parts = requestBody.raw
+        .map((chunk) => (chunk?.bytes ? textDecoder.decode(chunk.bytes) : ""))
+        .join("");
+      return parts ? parts.slice(0, 2000) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  if (requestBody.formData) {
+    try {
+      return JSON.stringify(requestBody.formData).slice(0, 2000);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function recordNetworkEntry(tabId, entry) {
+  let list = networkLogs.get(tabId);
+  if (!list) {
+    list = [];
+    networkLogs.set(tabId, list);
+  }
+  list.push(entry);
+  if (list.length > MAX_NETWORK_ENTRIES_PER_TAB) {
+    list.splice(0, list.length - MAX_NETWORK_ENTRIES_PER_TAB);
+  }
+}
+
 function isScriptableUrl(url) {
   return typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"));
 }
@@ -289,6 +338,7 @@ async function handleRpcRequest(method, params) {
   if (method === "tabs.close") {
     const tabId = params?.tabId;
     await requireAttachedTab(tabId);
+    networkLogs.delete(tabId);
     if (agentOpenedTabs.has(tabId)) {
       attachedTabs.delete(tabId);
       agentOpenedTabs.delete(tabId);
@@ -449,6 +499,7 @@ async function handleRpcRequest(method, params) {
       method: httpMethod,
       headers: params?.headers,
       body: params?.body,
+      credentials: params?.credentials,
       timeoutMs: params?.timeoutMs,
       maxChars: params?.maxChars,
     });
@@ -458,7 +509,98 @@ async function handleRpcRequest(method, params) {
     };
   }
 
+  if (method === "tabs.network") {
+    const tab = await requireAttachedTab(params?.tabId);
+    const filter = typeof params?.filter === "string" ? params.filter.trim().toLowerCase() : "";
+    const limit = Math.min(Math.max(Number(params?.limit) || 25, 1), MAX_NETWORK_ENTRIES_PER_TAB);
+    const rawList = networkLogs.get(tab.id) || [];
+    const filtered = filter
+      ? rawList.filter(
+          (item) =>
+            item.url.toLowerCase().includes(filter) ||
+            (item.requestBody && item.requestBody.toLowerCase().includes(filter))
+        )
+      : rawList;
+
+    const entries = filtered.slice(-limit).map((item) => ({
+      url: item.url,
+      method: item.method,
+      statusCode: item.statusCode,
+      timestamp: item.timestamp,
+      headers: item.headers,
+      ...(item.requestBody !== undefined ? { requestBody: item.requestBody } : {}),
+      ...(item.error !== undefined ? { error: item.error } : {}),
+    }));
+
+    if (params?.clear === true) {
+      networkLogs.delete(tab.id);
+    }
+
+    return {
+      tabId: tab.id,
+      totalBuffered: rawList.length,
+      count: entries.length,
+      entries,
+    };
+  }
+
   throw makeError("METHOD_NOT_FOUND", `Unknown method: ${method}`);
+}
+
+if (browser.webRequest) {
+  const filterSpec = { urls: ["<all_urls>"], types: ["xmlhttprequest"] };
+
+  browser.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId < 0 || !attachedTabs.has(details.tabId)) return;
+      if (pendingRequests.size > 500) pendingRequests.clear();
+      const entry = {
+        requestId: details.requestId,
+        url: details.url,
+        method: details.method,
+        timestamp: Math.round(details.timeStamp),
+        statusCode: null,
+        headers: {},
+        requestBody: decodeRequestBody(details.requestBody),
+      };
+      pendingRequests.set(details.requestId, entry);
+      recordNetworkEntry(details.tabId, entry);
+    },
+    filterSpec,
+    ["requestBody"]
+  );
+
+  browser.webRequest.onBeforeSendHeaders.addListener(
+    (details) => {
+      const entry = pendingRequests.get(details.requestId);
+      if (!entry || !Array.isArray(details.requestHeaders)) return;
+      for (const header of details.requestHeaders) {
+        const lower = String(header.name || "").toLowerCase();
+        if (!lower || STRIPPED_HEADERS.has(lower)) continue;
+        if (typeof header.value === "string") {
+          entry.headers[lower] = header.value;
+        }
+      }
+    },
+    filterSpec,
+    ["requestHeaders"]
+  );
+
+  browser.webRequest.onCompleted.addListener((details) => {
+    const entry = pendingRequests.get(details.requestId);
+    if (entry) {
+      entry.statusCode = details.statusCode ?? null;
+      pendingRequests.delete(details.requestId);
+    }
+  }, filterSpec);
+
+  browser.webRequest.onErrorOccurred.addListener((details) => {
+    const entry = pendingRequests.get(details.requestId);
+    if (entry) {
+      entry.error = details.error || "request_failed";
+      pendingRequests.delete(details.requestId);
+    }
+  }, filterSpec);
 }
 
 browser.runtime.onMessage.addListener((message) => {
@@ -471,6 +613,7 @@ browser.runtime.onMessage.addListener((message) => {
       const tabId = message.tabId;
       if (attachedTabs.has(tabId)) {
         attachedTabs.delete(tabId);
+        networkLogs.delete(tabId);
       } else {
         const tab = await browser.tabs.get(tabId).catch(() => null);
         if (tab && isScriptableUrl(tab.url)) {
@@ -485,6 +628,7 @@ browser.runtime.onMessage.addListener((message) => {
         attachedWindows.delete(windowId);
         for (const tab of winTabs) {
           attachedTabs.delete(tab.id);
+          networkLogs.delete(tab.id);
         }
       } else {
         attachedWindows.add(windowId);
@@ -501,6 +645,7 @@ browser.runtime.onMessage.addListener((message) => {
     } else if (message.type === "popup:detachAll") {
       attachedTabs.clear();
       attachedWindows.clear();
+      networkLogs.clear();
       await refreshAllBadges();
     }
 
@@ -528,6 +673,7 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 browser.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
   agentOpenedTabs.delete(tabId);
+  networkLogs.delete(tabId);
 });
 
 browser.tabs.onActivated.addListener(({ tabId }) => {

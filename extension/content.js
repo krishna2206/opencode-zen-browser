@@ -540,6 +540,8 @@ if (!globalThis.__opencodeZenLoaded) {
 
     const timeoutMs = Math.min(Math.max(Number(params.timeoutMs) || 15000, 500), 30000);
     const maxChars = Math.min(Math.max(Number(params.maxChars) || 100000, 1000), 1000000);
+    const allowedCreds = new Set(["include", "same-origin", "omit"]);
+    const credentials = allowedCreds.has(params.credentials) ? params.credentials : "include";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -548,7 +550,7 @@ if (!globalThis.__opencodeZenLoaded) {
         method,
         headers,
         body,
-        credentials: "include",
+        credentials,
         signal: controller.signal,
       });
 

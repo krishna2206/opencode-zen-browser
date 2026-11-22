@@ -12,7 +12,8 @@ Instead of launching a separate headless browser or copying cookies out of Zen, 
 - **Two snapshot modes:**
   - `interactive`: semantic DOM tree with `@1`, `@2` element refs and structured `elements` array (`role`, `name`, `value`, `checked`, etc.). Automatically scopes to an open modal dialog if present, otherwise `<main>`, otherwise `<body>`, and walks open Shadow DOMs.
   - `markdown`: extracts prose via `@mozilla/readability`, `linkedom`, and `turndown`.
-- **Same-site authenticated fetch (`tools.zen.fetch`):** runs `window.fetch(..., { credentials: "include" })` inside the attached tab so internal REST/GraphQL requests reuse the browser's live TLS/HTTP2 stack and cookies without leaving Zen. Cross-site URLs are rejected.
+- **Same-site authenticated fetch (`tools.zen.fetch`):** runs `window.fetch` inside the attached tab (`credentials: "include"` by default, or `"same-origin"` / `"omit"` for public CORS `*` subdomains) so internal REST/GraphQL requests reuse the browser's live TLS/HTTP2 stack and cookies without leaving Zen. Cross-site URLs are rejected.
+- **Passive network capture (`tools.zen.network`):** buffers recent XHR/fetch requests per attached tab (URL, method, status code, non-cookie headers, request body) so you can inspect GraphQL `queryId`s or internal API parameters without DevTools.
 
 ## Tools (`tools.zen.*`)
 
@@ -24,7 +25,8 @@ Registered under the `zen` Code Mode namespace (`codemode: true`, `pinned: false
 | `tools.zen.open({ url, tabId?, windowId?, active? })` | Open a background tab or navigate an attached tab |
 | `tools.zen.snapshot({ tabId?, mode?, scope?, maxChars? })` | Extract interactive `@ref` tree + `elements`, or clean Markdown |
 | `tools.zen.interact({ tabId?, action, ref?, text?, ... })` | `click`, `type`, `scroll`, `wait`, or `back` (supports `waitMs`) |
-| `tools.zen.fetch({ tabId?, url, method?, headers?, body? })` | Execute an authenticated same-site HTTP/GraphQL request |
+| `tools.zen.fetch({ tabId?, url, method?, headers?, body?, credentials? })` | Execute an authenticated same-site HTTP/GraphQL request |
+| `tools.zen.network({ tabId?, filter?, limit?, clear? })` | Inspect recent XHR/fetch requests captured on an attached tab |
 | `tools.zen.screenshot({ tabId? })` | Save a PNG/JPEG capture to a temp file and return its path |
 | `tools.zen.close({ tabId })` | Close an agent-opened tab or detach a user-owned tab |
 

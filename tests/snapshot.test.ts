@@ -295,10 +295,12 @@ describe("extension content script snapshot and interactions", () => {
       const textRes = (await listener!({
         type: "zen:fetch",
         url: "/plain",
+        credentials: "omit",
         maxChars: 1000,
       })) as { truncated: boolean; text: string };
       expect(textRes.truncated).toBe(true);
       expect(textRes.text.length).toBe(1000);
+      expect(calls[1].init.credentials).toBe("omit");
 
       await expect(
         listener!({ type: "zen:fetch", url: "https://mail.google.com/mail/u/0/" })

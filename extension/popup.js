@@ -56,14 +56,9 @@ function getBaseUrl(rawUrl) {
   }
 }
 
-function escapeHtml(str) {
-  return String(str || "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[c]));
+function parseSvgNode(markup) {
+  const doc = new DOMParser().parseFromString(markup.trim(), "image/svg+xml");
+  return document.importNode(doc.documentElement, true);
 }
 
 function renderFaviconInto(el, favIconUrl) {
@@ -73,12 +68,12 @@ function renderFaviconInto(el, favIconUrl) {
     img.src = favIconUrl;
     img.alt = "";
     img.addEventListener("error", () => {
-      el.innerHTML = FALLBACK_FAVICON;
+      el.replaceChildren(parseSvgNode(FALLBACK_FAVICON));
     }, { once: true });
     el.appendChild(img);
     return;
   }
-  el.innerHTML = FALLBACK_FAVICON;
+  el.appendChild(parseSvgNode(FALLBACK_FAVICON));
 }
 
 function render(state) {
@@ -106,9 +101,10 @@ function render(state) {
       if (currentStateLabel.dataset.state !== nextState) {
         currentStateLabel.dataset.state = nextState;
         currentStateLabel.className = "active-state-label" + (readOnly ? " is-ro" : "");
-        currentStateLabel.innerHTML = readOnly
-          ? `${LOCK_ICON_FILL}<span>Lecture seule</span>`
-          : `${plugSvg(12)}<span>Attaché</span>`;
+        const iconNode = parseSvgNode(readOnly ? LOCK_ICON_FILL : plugSvg(12));
+        const textNode = document.createElement("span");
+        textNode.textContent = readOnly ? "Lecture seule" : "Attaché";
+        currentStateLabel.replaceChildren(iconNode, textNode);
       }
       toggleTabBtn.disabled = false;
       toggleTabBtn.className = "btn btn-secondary is-grow";
@@ -121,7 +117,7 @@ function render(state) {
       toggleTabBtn.textContent = "Attacher cet onglet";
     }
   } else {
-    currentFavicon.innerHTML = FALLBACK_FAVICON;
+    currentFavicon.replaceChildren(parseSvgNode(FALLBACK_FAVICON));
     currentTitle.textContent = "Aucun onglet actif";
     currentUrl.textContent = "";
     currentStateLabel.hidden = true;
@@ -142,7 +138,10 @@ function render(state) {
   detachAllBtn.hidden = attachedCount === 0;
 
   if (listableTabs.length === 0) {
-    tabList.innerHTML = `<div class="empty-state">Aucun onglet web ouvert.</div>`;
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "empty-state";
+    emptyEl.textContent = "Aucun onglet web ouvert.";
+    tabList.replaceChildren(emptyEl);
     return;
   }
 
@@ -209,7 +208,7 @@ function render(state) {
     btn.title = tab.attached ? "Détacher cet onglet" : "Attacher cet onglet";
     btn.setAttribute("aria-label", `${tab.attached ? "Détacher" : "Attacher"} ${tab.title || ""}`);
     btn.setAttribute("aria-pressed", String(tab.attached));
-    btn.innerHTML = plugSvg(16);
+    btn.appendChild(parseSvgNode(plugSvg(16)));
 
     row.appendChild(icon);
     row.appendChild(info);

@@ -10,6 +10,7 @@ import type {
   FetchResult,
   InteractiveSnapshotResult,
   MarkdownSnapshotRawResult,
+  NetworkResult,
   ScreenshotRawResult,
   TabInfo,
   TabsListResult,
@@ -95,7 +96,7 @@ export default Plugin.define({
       tools.namespace({
         name: "zen",
         description:
-          "Explore and interact with attached Zen Browser tabs (tabs, open, snapshot, interact, fetch, screenshot, close). Use in Code Mode to batch navigation, clicks, waits, authenticated same-site requests and snapshots into a single execute call.",
+          "Explore and interact with attached Zen Browser tabs (tabs, open, snapshot, interact, fetch, network, screenshot, close). Use in Code Mode to batch navigation, clicks, waits, passive network inspection, authenticated same-site requests and snapshots into a single execute call.",
       });
 
       tools.add({
@@ -444,6 +445,11 @@ export default Plugin.define({
               description: "Request body (string or JSON object/array, auto-serialized as JSON)",
             })
           ),
+          credentials: Schema.optional(
+            Schema.Literals(["include", "same-origin", "omit"]).annotate({
+              description: "Fetch credentials mode (default 'include'; use 'omit' for public CORS '*' endpoints)",
+            })
+          ),
           timeoutMs: Schema.optional(
             Schema.Number.annotate({ description: "Request timeout in ms (default 15000, max 30000)" })
           ),
@@ -471,6 +477,7 @@ export default Plugin.define({
               method: input.method ?? "GET",
               headers: input.headers,
               body: input.body,
+              credentials: input.credentials,
               timeoutMs: input.timeoutMs,
               maxChars: input.maxChars,
             },
@@ -490,6 +497,61 @@ export default Plugin.define({
             output,
             content: `${res.status} ${res.url}`,
             metadata: { tabId: res.tabId, status: res.status, ok: res.ok },
+          };
+        },
+      });
+
+      tools.add({
+        name: "network",
+        options: ZEN_OPTIONS,
+        description:
+          "Read recent XHR/fetch requests captured passively on an attached tab (URL, method, statusCode, non-cookie headers, requestBody) to discover GraphQL queryIds or API endpoints without DevTools.",
+        input: Schema.Struct({
+          tabId: Schema.optional(
+            Schema.Number.annotate({ description: "Attached tabId (optional if unambiguous)" })
+          ),
+          filter: Schema.optional(
+            Schema.String.annotate({ description: "Case-insensitive substring filter against URL or requestBody (e.g. 'graphql')" })
+          ),
+          limit: Schema.optional(
+            Schema.Number.annotate({ description: "Max most-recent entries to return (default 25, max 80)" })
+          ),
+          clear: Schema.optional(
+            Schema.Boolean.annotate({ description: "Clear the tab's captured buffer after reading (default false)" })
+          ),
+        }),
+        output: Schema.Struct({
+          tabId: Schema.Number,
+          totalBuffered: Schema.Number,
+          count: Schema.Number,
+          entries: Schema.Array(
+            Schema.Struct({
+              url: Schema.String,
+              method: Schema.String,
+              statusCode: Schema.Union([Schema.Number, Schema.Null]),
+              timestamp: Schema.Number,
+              headers: Schema.Record(Schema.String, Schema.String),
+              requestBody: Schema.optional(Schema.String),
+              error: Schema.optional(Schema.String),
+            })
+          ),
+        }),
+        execute: async (input, context) => {
+          const tabId = await resolveTargetTabId(input.tabId, socketPath, context.signal);
+          const res = await callZenBridge<NetworkResult>(
+            "tabs.network",
+            {
+              tabId,
+              filter: input.filter,
+              limit: input.limit,
+              clear: input.clear,
+            },
+            { socketPath, signal: context.signal }
+          );
+          return {
+            output: res,
+            content: `Captured ${res.count} requests (${res.totalBuffered} buffered) on tab ${res.tabId}`,
+            metadata: { tabId: res.tabId, count: res.count },
           };
         },
       });

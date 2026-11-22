@@ -77,3 +77,20 @@ export interface FetchResult {
   json?: unknown;
   text?: string;
 }
+
+export interface NetworkEntry {
+  url: string;
+  method: string;
+  statusCode: number | null;
+  timestamp: number;
+  headers: Record<string, string>;
+  requestBody?: string;
+  error?: string;
+}
+
+export interface NetworkResult {
+  tabId: number;
+  totalBuffered: number;
+  count: number;
+  entries: NetworkEntry[];
+}
