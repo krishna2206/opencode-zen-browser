@@ -43,7 +43,9 @@ export function htmlToReadableMarkdown(
 
   let article: ReturnType<Readability["parse"]> = null;
   try {
-    const reader = new Readability(document.cloneNode(true) as unknown as ConstructorParameters<typeof Readability>[0]);
+    const reader = new Readability(
+      document.cloneNode(true) as unknown as ConstructorParameters<typeof Readability>[0]
+    );
     article = reader.parse();
   } catch {
     article = null;

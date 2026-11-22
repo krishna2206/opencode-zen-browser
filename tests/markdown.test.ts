@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { htmlToReadableMarkdown } from "../src/markdown.js";
+import { htmlToReadableMarkdown } from "../src/core/markdown.js";
 
 describe("htmlToReadableMarkdown", () => {
   test("extracts main article content via Readability and strips nav/script noise", () => {

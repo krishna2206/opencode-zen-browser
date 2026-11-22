@@ -10,19 +10,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bridgeScript = path.join(__dirname, "bridge.mjs");
 const cacheDir = path.join(os.homedir(), ".cache", "opencode-zen-browser");
 const launcherPath = path.join(cacheDir, "opencode-zen-browser-host");
-const nmDir = path.join(os.homedir(), "Library", "Application Support", "Mozilla", "NativeMessagingHosts");
+
+function resolveNativeMessagingDir(platform = process.platform) {
+  if (platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Mozilla", "NativeMessagingHosts");
+  }
+  if (platform === "linux") {
+    return path.join(os.homedir(), ".mozilla", "native-messaging-hosts");
+  }
+  throw new Error(`Unsupported platform: ${platform}. Only macOS (darwin) and Linux are supported.`);
+}
+
+const nmDir = resolveNativeMessagingDir();
 const manifestPath = path.join(nmDir, `${HOST_NAME}.json`);
 
-const bunPath = process.execPath;
-if (!fs.existsSync(bunPath)) {
-  throw new Error(`Bun binary not found at ${bunPath}`);
+const runtimePath = process.execPath;
+if (!fs.existsSync(runtimePath)) {
+  throw new Error(`JS runtime binary not found at ${runtimePath}`);
 }
 
 fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
 fs.mkdirSync(nmDir, { recursive: true });
 
 const launcher = `#!/bin/sh
-exec "${bunPath}" "${bridgeScript}" "$@"
+exec "${runtimePath}" "${bridgeScript}" "$@"
 `;
 fs.writeFileSync(launcherPath, launcher, { mode: 0o755 });
 fs.chmodSync(launcherPath, 0o755);
@@ -39,4 +50,15 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", { mode:
 
 console.log(`Launcher written: ${launcherPath}`);
 console.log(`Native Messaging manifest written: ${manifestPath}`);
-console.log(`Runtime: ${bunPath}`);
+console.log(`Runtime: ${runtimePath}`);
+
+if (process.platform === "linux") {
+  const flatpakDir = path.join(os.homedir(), ".var", "app", "app.zen_browser.zen");
+  if (fs.existsSync(flatpakDir)) {
+    console.warn(
+      `\nWarning: Zen Browser Flatpak data detected at ${flatpakDir}.\n` +
+        "Flatpak sandboxes Native Messaging by default. Use the native/AppImage/tarball Zen build, " +
+        "or configure flatpak-spawn --host with ~/.var/app/app.zen_browser.zen/.mozilla/native-messaging-hosts."
+    );
+  }
+}

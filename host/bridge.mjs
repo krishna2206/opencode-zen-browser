@@ -2,6 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { NativeFrameDecoder, encodeNativeMessage } from "./protocol.mjs";
 
 export const CACHE_DIR = path.join(os.homedir(), ".cache", "opencode-zen-browser");
@@ -197,7 +198,16 @@ export function startBridge({
   return { server, shutdown, socketPath };
 }
 
-if (import.meta.main) {
+const isMainModule = (() => {
+  try {
+    if (!process.argv[1]) return false;
+    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isMainModule) {
   const { shutdown } = startBridge({
     onShutdown: (code) => {
       setTimeout(() => process.exit(code), 20);

@@ -1,0 +1,12 @@
+{
+  "name": "zen-browser",
+  "version": "0.1.0",
+  "description": "Explore and interact with attached Zen Browser tabs (DOM snapshots, interactions, same-site fetch, passive network capture) via the zen-browser CLI.",
+  "author": {
+    "name": "Fitiavana Anhy Krishna",
+    "email": "fitiavana.krishna@gmail.com"
+  },
+  "repository": "https://github.com/krishna2206/opencode-zen-browser",
+  "license": "MIT",
+  "keywords": ["zen-browser", "browser", "automation", "cli"]
+}

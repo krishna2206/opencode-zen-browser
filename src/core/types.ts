@@ -11,6 +11,15 @@ export interface TabInfo {
   scriptable: boolean;
 }
 
+export interface TabSummary {
+  tabId: number;
+  windowId: number;
+  title: string;
+  url: string;
+  active: boolean;
+  openedByAgent: boolean;
+}
+
 export interface TabsListResult {
   bridgeConnected: boolean;
   readOnly: boolean;
@@ -62,6 +71,14 @@ export interface ScreenshotRawResult {
   dataUrl: string;
 }
 
+export interface ScreenshotResult {
+  tabId: number;
+  path: string;
+  mime: string;
+  title: string;
+  url: string;
+}
+
 export interface CloseResult {
   action: "closed" | "detached";
   tabId: number;
@@ -93,4 +110,24 @@ export interface NetworkResult {
   totalBuffered: number;
   count: number;
   entries: NetworkEntry[];
+}
+
+export interface InteractResult {
+  tabId: number;
+  action: string;
+  ref?: string;
+  tag?: string;
+  label?: string;
+  url?: string;
+  title?: string;
+  length?: number;
+  submitted?: boolean;
+  target?: string;
+  direction?: string;
+  scrollTop?: number;
+  scrollY?: number;
+  scrollHeight?: number;
+  found?: boolean;
+  text?: string;
+  waitedMs?: number;
 }

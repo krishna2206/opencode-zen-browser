@@ -5,6 +5,9 @@
   "description": "OpenCode 2 plugin and Zen Browser companion extension for human-paced web exploration.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "zen-browser": "./bin/zen-browser"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,14 +20,17 @@
   },
   "files": [
     "dist",
+    "bin",
     "host",
-    "extension"
+    "extension",
+    ".claude-plugin",
+    "skills"
   ],
   "scripts": {
     "build": "rm -rf dist && tsc",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "install-host": "bun host/install.mjs"
+    "install-host": "node host/install.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
@@ -41,6 +47,14 @@
   "peerDependencies": {
     "@opencode/plugin": "^2.2.0",
     "effect": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    },
+    "effect": {
+      "optional": true
+    }
   },
   "license": "MIT"
 }

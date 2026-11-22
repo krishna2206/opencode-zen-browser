@@ -5,7 +5,7 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { startBridge } from "../host/bridge.mjs";
 import { encodeNativeMessage, NativeFrameDecoder } from "../host/protocol.mjs";
-import { callZenBridge, ZenBridgeError } from "../src/client.js";
+import { callZenBridge, ZenBridgeError } from "../src/core/client.js";
 
 const tempDirs: string[] = [];
 

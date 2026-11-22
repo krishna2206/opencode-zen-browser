@@ -9,6 +9,13 @@ export const DEFAULT_SOCKET_PATH = path.join(
   "bridge.sock"
 );
 
+export function resolveSocketPath(explicit?: string): string {
+  if (typeof explicit === "string" && explicit.length > 0) return explicit;
+  const fromEnv = process.env.ZEN_BROWSER_SOCKET;
+  if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
+  return DEFAULT_SOCKET_PATH;
+}
+
 export class ZenBridgeError extends Error {
   readonly code: string;
 
@@ -30,7 +37,7 @@ export async function callZenBridge<T = unknown>(
   params: Record<string, unknown> = {},
   options: RpcCallOptions = {}
 ): Promise<T> {
-  const socketPath = options.socketPath ?? DEFAULT_SOCKET_PATH;
+  const socketPath = resolveSocketPath(options.socketPath);
   const timeoutMs = options.timeoutMs ?? 35_000;
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
