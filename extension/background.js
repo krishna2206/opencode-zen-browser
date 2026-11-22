@@ -7,6 +7,10 @@ let readOnly = false;
 const attachedTabs = new Set();
 const agentOpenedTabs = new Set();
 const attachedWindows = new Set();
+const tabRefRouting = new Map();
+
+const MAX_CHILD_IFRAMES = 8;
+const MAX_IFRAME_CHARS = 2000;
 
 const MAX_NETWORK_ENTRIES_PER_TAB = 80;
 const networkLogs = new Map();
@@ -166,6 +170,7 @@ async function getPopupState() {
     } catch {
       attachedTabs.delete(tabId);
       agentOpenedTabs.delete(tabId);
+      tabRefRouting.delete(tabId);
     }
   }
 
@@ -199,15 +204,55 @@ async function requireAttachedTab(tabId) {
   } catch (err) {
     attachedTabs.delete(tabId);
     agentOpenedTabs.delete(tabId);
+    tabRefRouting.delete(tabId);
     throw err?.code ? err : makeError("TAB_NOT_FOUND", `Tab ${tabId} no longer exists`);
   }
 }
 
-async function ensureContentScript(tabId) {
+async function ensureContentScript(tabId, allFrames = false) {
   await browser.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, frameIds: [0] },
     files: ["content.js"],
   });
+
+  const frameIds = [0];
+  if (allFrames) {
+    try {
+      const results = await browser.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: ["content.js"],
+      });
+      if (Array.isArray(results)) {
+        for (const res of results) {
+          if (typeof res?.frameId === "number" && res.frameId !== 0 && !frameIds.includes(res.frameId)) {
+            frameIds.push(res.frameId);
+          }
+        }
+      }
+    } catch {
+      // Sandboxed or cross-origin frames must not break top-frame snapshots
+    }
+  }
+  return frameIds;
+}
+
+async function pollTopFrameCondition(tabId, message, waitMs, timeoutMessage) {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    try {
+      await ensureContentScript(tabId, false);
+      const res = await browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+      if (res?.found) {
+        return res;
+      }
+    } catch {
+      // Tab may be mid-navigation between pages; retry until deadline
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(250, remaining)));
+  }
+  throw makeError("WAIT_TIMEOUT", timeoutMessage);
 }
 
 function waitForTabComplete(tabId, timeoutMs = 15000) {
@@ -291,6 +336,7 @@ async function handleRpcRequest(method, params) {
       } catch {
         attachedTabs.delete(tabId);
         agentOpenedTabs.delete(tabId);
+        tabRefRouting.delete(tabId);
       }
     }
     return {
@@ -309,6 +355,7 @@ async function handleRpcRequest(method, params) {
 
     if (typeof params.tabId === "number") {
       await requireAttachedTab(params.tabId);
+      tabRefRouting.delete(params.tabId);
       await browser.tabs.update(params.tabId, {
         url,
         ...(typeof params.active === "boolean" ? { active: params.active } : {}),
@@ -339,6 +386,7 @@ async function handleRpcRequest(method, params) {
     const tabId = params?.tabId;
     await requireAttachedTab(tabId);
     networkLogs.delete(tabId);
+    tabRefRouting.delete(tabId);
     if (agentOpenedTabs.has(tabId)) {
       attachedTabs.delete(tabId);
       agentOpenedTabs.delete(tabId);
@@ -352,19 +400,133 @@ async function handleRpcRequest(method, params) {
 
   if (method === "tabs.snapshot") {
     const tab = await requireAttachedTab(params?.tabId);
-    await ensureContentScript(tab.id);
     const mode = params?.mode === "markdown" ? "markdown" : "interactive";
-    const result = await browser.tabs.sendMessage(tab.id, {
-      type: "zen:snapshot",
-      mode,
-      maxChars: params?.maxChars,
-      scope: params?.scope,
-    });
+
+    if (mode === "markdown") {
+      await ensureContentScript(tab.id, false);
+      const result = await browser.tabs.sendMessage(
+        tab.id,
+        {
+          type: "zen:snapshot",
+          mode: "markdown",
+          maxChars: params?.maxChars,
+        },
+        { frameId: 0 }
+      );
+      return {
+        tabId: tab.id,
+        windowId: tab.windowId,
+        mode,
+        ...result,
+      };
+    }
+
+    const includeIframes = params?.includeIframes !== false;
+    const maxTotalChars = Math.min(Math.max(Number(params?.maxChars) || 8000, 500), 100000);
+    const frameIds = await ensureContentScript(tab.id, includeIframes);
+
+    const topResult = await browser.tabs.sendMessage(
+      tab.id,
+      {
+        type: "zen:snapshot",
+        mode: "interactive",
+        maxChars: maxTotalChars,
+        scope: params?.scope,
+        refStart: 1,
+      },
+      { frameId: 0 }
+    );
+
+    const routing = new Map();
+    const elements = [...(topResult.elements || [])];
+    for (const el of elements) {
+      routing.set(el.ref, 0);
+    }
+
+    const contentParts = topResult.content ? [topResult.content] : [];
+    let currentChars = topResult.content ? topResult.content.length : 0;
+    let nextRef =
+      typeof topResult.nextRef === "number" ? topResult.nextRef : elements.length + 1;
+    let truncated = Boolean(topResult.truncated);
+
+    if (includeIframes && !truncated) {
+      let includedIframes = 0;
+      for (const frameId of frameIds) {
+        if (frameId === 0) continue;
+        if (includedIframes >= MAX_CHILD_IFRAMES) break;
+
+        const frameBudget = Math.min(
+          MAX_IFRAME_CHARS,
+          Math.max(0, maxTotalChars - currentChars - 80)
+        );
+        if (frameBudget < 150) {
+          truncated = true;
+          break;
+        }
+
+        let childRes;
+        try {
+          childRes = await browser.tabs.sendMessage(
+            tab.id,
+            {
+              type: "zen:snapshot",
+              mode: "interactive",
+              maxChars: frameBudget,
+              scope: params?.scope || "auto",
+              refStart: nextRef,
+            },
+            { frameId }
+          );
+        } catch {
+          continue;
+        }
+
+        if (!childRes || childRes.skipped) continue;
+        const childElements = Array.isArray(childRes.elements) ? childRes.elements : [];
+        const childContent = typeof childRes.content === "string" ? childRes.content : "";
+        if (!childContent || (childElements.length === 0 && childContent.trim().length < 5)) {
+          continue;
+        }
+
+        let host = "";
+        try {
+          host = new URL(childRes.url).hostname;
+        } catch {
+          host = childRes.url || "";
+        }
+        const titleText = childRes.title ? String(childRes.title).slice(0, 60).replace(/"/g, "'") : "";
+        const titlePart = titleText ? ` "${titleText}"` : "";
+        const hostPart = host ? ` (${host})` : "";
+        const block = `iframe${titlePart}${hostPart}:\n${childContent}`;
+
+        for (const el of childElements) {
+          routing.set(el.ref, frameId);
+          elements.push(el);
+        }
+        contentParts.push(block);
+        currentChars += block.length + 2;
+        nextRef =
+          typeof childRes.nextRef === "number"
+            ? childRes.nextRef
+            : nextRef + childElements.length;
+        if (childRes.truncated) truncated = true;
+        includedIframes++;
+      }
+    }
+
+    tabRefRouting.set(tab.id, routing);
+
     return {
       tabId: tab.id,
       windowId: tab.windowId,
       mode,
-      ...result,
+      url: topResult.url,
+      title: topResult.title,
+      scope: topResult.scope,
+      refCount: elements.length,
+      truncated,
+      elements,
+      content: contentParts.join("\n\n"),
     };
   }
 
@@ -377,6 +539,7 @@ async function handleRpcRequest(method, params) {
     }
 
     if (action === "back") {
+      tabRefRouting.delete(tab.id);
       await browser.tabs.goBack(tab.id);
       const updated = await waitForTabComplete(tab.id, 8000);
       return {
@@ -389,50 +552,86 @@ async function handleRpcRequest(method, params) {
 
     if (action === "wait") {
       const waitMs = Math.min(Math.max(Number(params?.ms) || 1000, 50), 10000);
+      if (params?.dialog === true) {
+        await pollTopFrameCondition(
+          tab.id,
+          { type: "zen:hasDialog" },
+          waitMs,
+          `No dialog appeared within ${waitMs}ms`
+        );
+        return { action: "wait", found: true, dialog: true };
+      }
       if (typeof params?.text === "string" && params.text.length > 0) {
-        await ensureContentScript(tab.id);
-        const deadline = Date.now() + waitMs;
-        while (Date.now() < deadline) {
-          const res = await browser.tabs.sendMessage(tab.id, {
-            type: "zen:hasText",
-            text: params.text,
-          });
-          if (res?.found) {
-            return { action: "wait", found: true, text: params.text };
-          }
-          await new Promise((r) => setTimeout(r, 250));
-        }
-        throw makeError("WAIT_TIMEOUT", `Text "${params.text}" did not appear within ${waitMs}ms`);
+        await pollTopFrameCondition(
+          tab.id,
+          { type: "zen:hasText", text: params.text },
+          waitMs,
+          `Text "${params.text}" did not appear within ${waitMs}ms`
+        );
+        return { action: "wait", found: true, text: params.text };
       }
       await new Promise((r) => setTimeout(r, waitMs));
       return { action: "wait", waitedMs: waitMs };
     }
 
-    await ensureContentScript(tab.id);
+    let targetFrameId = 0;
+    let normalizedRef = params?.ref;
+    if (typeof params?.ref === "string" && params.ref.length > 0) {
+      normalizedRef = params.ref.startsWith("@") ? params.ref : `@${params.ref}`;
+      const routing = tabRefRouting.get(tab.id);
+      if (routing && routing.has(normalizedRef)) {
+        targetFrameId = routing.get(normalizedRef);
+      }
+    }
 
-    let actionResult;
+    if (targetFrameId === 0) {
+      await ensureContentScript(tab.id, false);
+    }
+
+    let payload;
     if (action === "click") {
-      actionResult = await browser.tabs.sendMessage(tab.id, {
+      payload = {
         type: "zen:click",
         ref: params?.ref,
-      });
+      };
     } else if (action === "type") {
-      actionResult = await browser.tabs.sendMessage(tab.id, {
+      payload = {
         type: "zen:type",
         ref: params?.ref,
         text: params?.text,
         clear: params?.clear ?? true,
         submit: params?.submit ?? false,
-      });
+      };
     } else if (action === "scroll") {
-      actionResult = await browser.tabs.sendMessage(tab.id, {
+      payload = {
         type: "zen:scroll",
         direction: params?.direction || "down",
         amount: params?.amount || 600,
         ref: params?.ref,
-      });
+      };
     } else {
       throw makeError("INVALID_ACTION", `Unsupported action: ${String(action)}`);
+    }
+
+    let actionResult;
+    try {
+      actionResult = await browser.tabs.sendMessage(tab.id, payload, {
+        frameId: targetFrameId,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (
+        targetFrameId !== 0 &&
+        /receiving end does not exist|could not establish connection|message manager disconnected/i.test(
+          msg
+        )
+      ) {
+        throw makeError(
+          "STALE_IFRAME_REF",
+          `Element ${normalizedRef} belongs to a closed or reloaded iframe — call snapshot again`
+        );
+      }
+      throw err;
     }
 
     const postWaitMs = Number(params?.waitMs);
@@ -492,17 +691,21 @@ async function handleRpcRequest(method, params) {
       );
     }
 
-    await ensureContentScript(tab.id);
-    const res = await browser.tabs.sendMessage(tab.id, {
-      type: "zen:fetch",
-      url: params?.url,
-      method: httpMethod,
-      headers: params?.headers,
-      body: params?.body,
-      credentials: params?.credentials,
-      timeoutMs: params?.timeoutMs,
-      maxChars: params?.maxChars,
-    });
+    await ensureContentScript(tab.id, false);
+    const res = await browser.tabs.sendMessage(
+      tab.id,
+      {
+        type: "zen:fetch",
+        url: params?.url,
+        method: httpMethod,
+        headers: params?.headers,
+        body: params?.body,
+        credentials: params?.credentials,
+        timeoutMs: params?.timeoutMs,
+        maxChars: params?.maxChars,
+      },
+      { frameId: 0 }
+    );
     return {
       tabId: tab.id,
       ...res,
@@ -614,6 +817,7 @@ browser.runtime.onMessage.addListener((message) => {
       if (attachedTabs.has(tabId)) {
         attachedTabs.delete(tabId);
         networkLogs.delete(tabId);
+        tabRefRouting.delete(tabId);
       } else {
         const tab = await browser.tabs.get(tabId).catch(() => null);
         if (tab && isScriptableUrl(tab.url)) {
@@ -629,6 +833,7 @@ browser.runtime.onMessage.addListener((message) => {
         for (const tab of winTabs) {
           attachedTabs.delete(tab.id);
           networkLogs.delete(tab.id);
+          tabRefRouting.delete(tab.id);
         }
       } else {
         attachedWindows.add(windowId);
@@ -646,6 +851,7 @@ browser.runtime.onMessage.addListener((message) => {
       attachedTabs.clear();
       attachedWindows.clear();
       networkLogs.clear();
+      tabRefRouting.clear();
       await refreshAllBadges();
     }
 
@@ -661,6 +867,9 @@ browser.tabs.onCreated.addListener((tab) => {
 });
 
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url || changeInfo.status === "loading") {
+    tabRefRouting.delete(tabId);
+  }
   if (changeInfo.url && attachedWindows.has(tab.windowId) && isScriptableUrl(tab.url)) {
     attachedTabs.add(tabId);
     updateBadgeForTab(tabId);
@@ -674,6 +883,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
   attachedTabs.delete(tabId);
   agentOpenedTabs.delete(tabId);
   networkLogs.delete(tabId);
+  tabRefRouting.delete(tabId);
 });
 
 browser.tabs.onActivated.addListener(({ tabId }) => {

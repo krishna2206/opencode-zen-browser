@@ -76,6 +76,79 @@ if (!globalThis.__opencodeZenLoaded) {
     return hasNonZeroBox(el);
   }
 
+  function isTopFrame() {
+    try {
+      return !window.top || window === window.top;
+    } catch {
+      return false;
+    }
+  }
+
+  function isTinyChildFrame() {
+    if (isTopFrame()) return false;
+    const w = window.innerWidth || 0;
+    const h = window.innerHeight || 0;
+    return w < 40 || h < 16;
+  }
+
+  function isBorderlineSmallChildFrame() {
+    if (isTopFrame()) return false;
+    const w = window.innerWidth || 0;
+    const h = window.innerHeight || 0;
+    return w < 80 || h < 40;
+  }
+
+  function isLargeViewportCandidate(el, vw, vh) {
+    const rect = el.getBoundingClientRect();
+    return rect.width >= vw * 0.92 && rect.height >= vh * 0.92;
+  }
+
+  function isFloatingPanelCandidate(el, vw, vh) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 160 || rect.height < 80) return false;
+    if (rect.width >= vw * 0.92 || rect.height >= vh * 0.92) return false;
+    if (cleanText(el.textContent).length === 0) return false;
+    return Boolean(el.querySelector(INTERACTIVE_SELECTOR));
+  }
+
+  function findFallbackBodyModals() {
+    if (!document.body) return [];
+    const vw = window.innerWidth || document.documentElement?.clientWidth || 1280;
+    const vh = window.innerHeight || document.documentElement?.clientHeight || 800;
+    const found = [];
+
+    for (const child of document.body.children) {
+      if (child.hidden || child.getAttribute("aria-hidden") === "true") continue;
+      const style = getComputedStyle(child);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
+      if (style.position !== "fixed") continue;
+      const z = Number.parseInt(style.zIndex, 10);
+      if (!Number.isFinite(z) || z < 1000) continue;
+
+      if (isFloatingPanelCandidate(child, vw, vh)) {
+        found.push(child);
+        continue;
+      }
+
+      if (isLargeViewportCandidate(child, vw, vh)) {
+        const visibleChildren = Array.from(child.children).filter((c) => {
+          if (c.hidden || c.getAttribute("aria-hidden") === "true") return false;
+          const cs = getComputedStyle(c);
+          return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0";
+        });
+        if (visibleChildren.length <= 2) {
+          for (const inner of visibleChildren) {
+            if (isFloatingPanelCandidate(inner, vw, vh)) {
+              found.push(inner);
+            }
+          }
+        }
+      }
+    }
+
+    return found;
+  }
+
   function findVisibleDialogs(root, out = []) {
     if (!root || typeof root.querySelectorAll !== "function") return out;
     for (const dlg of root.querySelectorAll("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']")) {
@@ -91,6 +164,11 @@ if (!globalThis.__opencodeZenLoaded) {
         findVisibleDialogs(el.shadowRoot, out);
       }
     }
+    if (root === document && out.length === 0) {
+      for (const fallback of findFallbackBodyModals()) {
+        out.push(fallback);
+      }
+    }
     return out;
   }
 
@@ -104,9 +182,13 @@ if (!globalThis.__opencodeZenLoaded) {
       return { root: document.body, scopeUsed: "body" };
     }
 
-    const dialogs = findVisibleDialogs(document);
-    if (dialogs.length > 0) {
-      return { root: dialogs[dialogs.length - 1], scopeUsed: "dialog" };
+    const allowDialogScope =
+      isTopFrame() || ((window.innerWidth || 0) > 400 && (window.innerHeight || 0) > 300);
+    if (allowDialogScope) {
+      const dialogs = findVisibleDialogs(document);
+      if (dialogs.length > 0) {
+        return { root: dialogs[dialogs.length - 1], scopeUsed: "dialog" };
+      }
     }
     const main = document.querySelector("main");
     if (main && !isSubtreeHidden(main) && cleanText(main.textContent).length > 40) {
@@ -222,9 +304,25 @@ if (!globalThis.__opencodeZenLoaded) {
     return `${info.role}${namePart}${attrPart} [${info.ref}]`;
   }
 
-  function buildInteractiveSnapshot(maxChars = 8000, scope = "auto") {
+  function buildInteractiveSnapshot(maxChars = 8000, scope = "auto", refStart = 1) {
     refMap.clear();
-    let nextRef = 1;
+    const parsedStart = Number(refStart);
+    let nextRef = Number.isFinite(parsedStart) && parsedStart >= 1 ? Math.floor(parsedStart) : 1;
+
+    if (isTinyChildFrame()) {
+      return {
+        skipped: true,
+        url: location.href,
+        title: document.title,
+        scope: "body",
+        refCount: 0,
+        nextRef,
+        truncated: false,
+        elements: [],
+        content: "",
+      };
+    }
+
     const lines = [];
     const elements = [];
     let totalChars = 0;
@@ -305,11 +403,26 @@ if (!globalThis.__opencodeZenLoaded) {
       walk(root);
     }
 
+    if (elements.length === 0 && isBorderlineSmallChildFrame()) {
+      return {
+        skipped: true,
+        url: location.href,
+        title: document.title,
+        scope: scopeUsed,
+        refCount: 0,
+        nextRef,
+        truncated: false,
+        elements: [],
+        content: "",
+      };
+    }
+
     return {
       url: location.href,
       title: document.title,
       scope: scopeUsed,
       refCount: elements.length,
+      nextRef,
       truncated,
       elements,
       content: lines.join("\n"),
@@ -599,7 +712,9 @@ if (!globalThis.__opencodeZenLoaded) {
       if (message.mode === "markdown") {
         return Promise.resolve(extractReadableHtml(message.maxChars));
       }
-      return Promise.resolve(buildInteractiveSnapshot(message.maxChars, message.scope));
+      return Promise.resolve(
+        buildInteractiveSnapshot(message.maxChars, message.scope, message.refStart)
+      );
     }
 
     if (message.type === "zen:click") {
@@ -622,6 +737,11 @@ if (!globalThis.__opencodeZenLoaded) {
       const needle = String(message.text || "");
       const bodyText = document.body?.innerText || "";
       return Promise.resolve({ found: bodyText.includes(needle) });
+    }
+
+    if (message.type === "zen:hasDialog") {
+      const dialogs = findVisibleDialogs(document);
+      return Promise.resolve({ found: dialogs.length > 0, count: dialogs.length });
     }
   });
 }

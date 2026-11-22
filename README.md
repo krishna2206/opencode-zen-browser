@@ -23,8 +23,8 @@ Registered under the `zen` Code Mode namespace (`codemode: true`, `pinned: false
 |---|---|
 | `tools.zen.tabs()` | List attached tabs, bridge status, and read-only state |
 | `tools.zen.open({ url, tabId?, windowId?, active? })` | Open a background tab or navigate an attached tab |
-| `tools.zen.snapshot({ tabId?, mode?, scope?, maxChars? })` | Extract interactive `@ref` tree + `elements`, or clean Markdown |
-| `tools.zen.interact({ tabId?, action, ref?, text?, ... })` | `click`, `type`, `scroll`, `wait`, or `back` (supports `waitMs`) |
+| `tools.zen.snapshot({ tabId?, mode?, scope?, maxChars?, includeIframes? })` | Extract interactive `@ref` tree + `elements` (across iframes), or clean Markdown |
+| `tools.zen.interact({ tabId?, action, ref?, text?, dialog?, ... })` | `click`, `type`, `scroll`, `wait` (supports `text` / `dialog`), or `back` |
 | `tools.zen.fetch({ tabId?, url, method?, headers?, body?, credentials? })` | Execute an authenticated same-site HTTP/GraphQL request |
 | `tools.zen.network({ tabId?, filter?, limit?, clear? })` | Inspect recent XHR/fetch requests captured on an attached tab |
 | `tools.zen.screenshot({ tabId? })` | Save a PNG/JPEG capture to a temp file and return its path |

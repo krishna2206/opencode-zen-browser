@@ -188,6 +188,9 @@ export default Plugin.define({
           maxChars: Schema.optional(
             Schema.Number.annotate({ description: "Max characters to return (default 8000 for interactive, 16000 for markdown)" })
           ),
+          includeIframes: Schema.optional(
+            Schema.Boolean.annotate({ description: "Include visible child iframes in interactive snapshots (default true)" })
+          ),
         }),
         output: Schema.Struct({
           tabId: Schema.Number,
@@ -238,7 +241,13 @@ export default Plugin.define({
 
           const snap = await callZenBridge<InteractiveSnapshotResult>(
             "tabs.snapshot",
-            { tabId, mode: "interactive", maxChars, scope: input.scope ?? "auto" },
+            {
+              tabId,
+              mode: "interactive",
+              maxChars,
+              scope: input.scope ?? "auto",
+              includeIframes: input.includeIframes,
+            },
             { socketPath, signal: context.signal }
           );
           const output = {
@@ -282,6 +291,9 @@ export default Plugin.define({
           text: Schema.optional(
             Schema.String.annotate({ description: "Text to type (for action='type') or text to wait for (for action='wait')" })
           ),
+          dialog: Schema.optional(
+            Schema.Boolean.annotate({ description: "For action='wait', wait until a visible modal/dialog opens" })
+          ),
           clear: Schema.optional(
             Schema.Boolean.annotate({ description: "Replace existing input value before typing (default true)" })
           ),
@@ -317,6 +329,7 @@ export default Plugin.define({
           scrollY: Schema.optional(Schema.Number),
           scrollHeight: Schema.optional(Schema.Number),
           found: Schema.optional(Schema.Boolean),
+          dialog: Schema.optional(Schema.Boolean),
           text: Schema.optional(Schema.String),
           waitedMs: Schema.optional(Schema.Number),
         }),
@@ -329,6 +342,7 @@ export default Plugin.define({
               action: input.action,
               ref: input.ref,
               text: input.text,
+              dialog: input.dialog,
               clear: input.clear,
               submit: input.submit,
               direction: input.direction,
@@ -358,6 +372,7 @@ export default Plugin.define({
             scrollY?: number;
             scrollHeight?: number;
             found?: boolean;
+            dialog?: boolean;
             text?: string;
             waitedMs?: number;
           };
